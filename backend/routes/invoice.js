@@ -1,25 +1,48 @@
 const express = require("express");
 const router = express.Router();
+const { ObjectId } = require('mongodb');
 
 module.exports = (db) => {
-  router.post("/invoice", (req, res) => {
-    const { userId, customerName, customerPhone, items, taxRate, totalPrice } = req.body;
-    db.query(
-      "INSERT INTO invoices (user_id, customer_name, customer_phone, items, tax_rate, total_price) VALUES (?, ?, ?, ?, ?, ?)",
-      [userId, customerName, customerPhone, JSON.stringify(items), taxRate, totalPrice],
-      (err) => {
-        if (err) return res.status(500).json({ success: false, message: err.message });
-        res.json({ success: true, message: "Invoice saved" });
-      }
-    );
+  const invoicesCollection = db.collection('invoices');
+
+  router.post("/invoice", async (req, res) => {
+    try {
+      const { userId, customerName, customerPhone, items, taxRate, totalPrice } = req.body;
+      
+      const result = await invoicesCollection.insertOne({
+        userId: new ObjectId(userId),
+        customerName,
+        customerPhone,
+        items: Array.isArray(items) ? items : JSON.parse(items),
+        taxRate: parseFloat(taxRate),
+        totalPrice: parseFloat(totalPrice),
+        createdAt: new Date()
+      });
+      
+      res.json({ 
+        success: true, 
+        message: "Invoice saved",
+        invoiceId: result.insertedId
+      });
+    } catch (err) {
+      res.status(500).json({ success: false, message: err.message });
+    }
   });
 
-  router.get("/invoices/:userId", (req, res) => {
-    const userId = req.params.userId;
-    db.query("SELECT * FROM invoices WHERE user_id = ?", [userId], (err, results) => {
-      if (err) return res.status(500).json({ success: false, message: err.message });
-      res.json({ success: true, data: results });
-    });
+  router.get("/invoices/:userId", async (req, res) => {
+    try {
+      const userId = req.params.userId;
+      const invoices = await invoicesCollection.find({ 
+        userId: new ObjectId(userId) 
+      }).toArray();
+      
+      res.json({ 
+        success: true, 
+        data: invoices 
+      });
+    } catch (err) {
+      res.status(500).json({ success: false, message: err.message });
+    }
   });
 
   return router;
