@@ -1,63 +1,97 @@
 const express = require("express");
 const router = express.Router();
+const { ObjectId } = require("mongodb");
 
 module.exports = (db) => {
+  const storesCollection = db.collection("stores");
+
   // Middleware to validate request body for POST /store
   const validateStoreData = (req, res, next) => {
-    const { userId, name, phone, address, logo } = req.body;
+    const { userId, name, phone, address } = req.body;
+
     if (!userId || !name || !phone || !address) {
-      return res
-        .status(400)
-        .json({ success: false, message: "All fields except logo are required" });
+      return res.status(400).json({
+        success: false,
+        message: "All fields (userId, name, phone, address) are required",
+      });
     }
+
+    if (!ObjectId.isValid(userId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid user ID format",
+      });
+    }
+
     next();
   };
 
-  // Save store details
-  router.post("/store", validateStoreData, (req, res) => {
+  // Save or update store details
+  router.post("/store", validateStoreData, async (req, res) => {
     const { userId, name, phone, address, logo } = req.body;
-  
-    const query = `
-      INSERT INTO stores (user_id, name, phone, address, logo)
-      VALUES (?, ?, ?, ?, ?)
-      ON DUPLICATE KEY UPDATE
-        name = VALUES(name),
-        phone = VALUES(phone),
-        address = VALUES(address),
-        logo = VALUES(logo)
-    `;
-  
-    db.query(query, [userId, name, phone, address, logo || null], (err) => {
-      if (err) {
-        console.error("Error saving/updating store:", err);
-        return res
-          .status(500)
-          .json({ success: false, message: "Failed to save/update store details" });
-      }
-      res.json({ success: true, message: "Store details saved/updated" });
-    });
-});
-  
+
+    try {
+      await storesCollection.updateOne(
+        { userId: new ObjectId(userId) },
+        {
+          $set: {
+            name,
+            phone,
+            address,
+            logo: logo || null,
+            updatedAt: new Date(),
+          },
+        },
+        { upsert: true }
+      );
+
+      res.json({
+        success: true,
+        message: "Store details saved/updated",
+      });
+    } catch (err) {
+      console.error("Error saving/updating store:", err);
+      res.status(500).json({
+        success: false,
+        message: "Failed to save/update store details",
+      });
+    }
+  });
 
   // Fetch store details by user ID
-  router.get("/store/:userId", (req, res) => {
+  router.get("/store/:userId", async (req, res) => {
     const userId = req.params.userId;
-    const query = "SELECT * FROM stores WHERE user_id = ?";
 
-    db.query(query, [userId], (err, results) => {
-      if (err) {
-        console.error("Error fetching store:", err);
-        return res
-          .status(500)
-          .json({ success: false, message: "Failed to fetch store details" });
+    if (!ObjectId.isValid(userId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid user ID format",
+      });
+    }
+
+    try {
+      const store = await storesCollection.findOne({
+        userId: new ObjectId(userId),
+      });
+
+      if (!store) {
+        return res.status(404).json({
+          success: false,
+          message: "Store not found for this user ID",
+        });
       }
-      if (results.length === 0) {
-        return res
-          .status(404)
-          .json({ success: false, message: "Store not found for this user ID" });
-      }
-      res.json({ success: true, data: results });
-    });
+
+      res.json({
+        success: true,
+        data: store,
+      });
+    } catch (err) {
+      console.error("Error fetching store:", err);
+      res.status(500).json({
+        success: false,
+        message: "Failed to fetch store details",
+      });
+    }
   });
 
   return router;
